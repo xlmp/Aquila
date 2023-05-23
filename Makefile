@@ -1,136 +1,57 @@
-# This is the top leve Makefile of AquilaOS
-#
-# Targets:
-#
-#  build-kernel     - build kernel image in kernel/{ARCH}/kernel-{VERSION}.{ARCH}
-#  install-kernel   - install kernel image into {DESTDIR}/boot/kernel
-#  clean-kernel     - clean kernel source tree
-#
-#  build-system     - build system components
-#  install-system   - install system components into {DESTDIR}/
-#  clean-system	    - clean system source tree
-#
-#  build-initrd     - build ramdisk image in initrd/initrd.img
-#  install-initrd   - install ramdisk image into {DESTDIR}/boot/initrd.img
-#  clean-initrd     - clean ramdisk source tree
-#
-#  build-all        - build everything
-#  install-all      - install everything
-#  clean-all        - clean everything
-#
+language = pt_br
+arch = x32
 
-export
+include src.makefiles/maketools.mk
+include src.makefiles/core.objects.mk
+include src.makefiles/makecompile.mk
 
-ifeq ($(SRCDIR),)
-SRCDIR := $(TRAVIS_BUILD_DIR)
-endif
+# include src.makefiles/apps.objects.mk
+# include src.makefiles/apps.creat.mk
 
-ifeq ($(SRCDIR),)
-SRCDIR != pwd
-endif
+linker: kernel/arch/i386/kernel.i386.ld
 
-ifeq ($(BUILDDIR),)
-BUILDDIR != pwd
-endif
+$(FinalKernel): linker $(CoreObjects)
+	@$(LD) $(LDFLAGS) -T $< -o $@ $(CoreObjects)
+	@echo "AquilaOS Compilador com Sucesso"
 
-ifeq ($(CONFIG),)
-CONFIG := i386-pc
-endif
+install: $(FinalKernel)
+	@copy $(subst /,\\, $(FinalKernel))  root\\Elision\\Sys\\ 
+#	$(tools-cfile) --template "L:\\Projetos\\ProjOS\\Elision\\_tools\\grub\\grub-template.cfg" --creat "L:\\Projetos\\ProjOS\\Elision\\root\\boot\\grub\\grub.cfg" -addKernel "FileKernel"
+	@echo "AquilaOS Instalado com Sucesso"
+#	echo $(boot_string)
 
-include $(SRCDIR)/configs/$(CONFIG).mk
+iso/Elision-$(arch)-$(versao_kernel).iso: install 
+#	$(FinalKernel)
+	@echo ----- Criação do ISO ----------------
+	@$(GRUB) --prefix=./root --config=root/boot/grub/grub.cfg --output=root/boot/grub/core.img -O i386-pc-eltorito biosdisk iso9660 multiboot
+	$(MKISO) -R -b boot/grub/core.img $(MKISO_FLAGS) -o ./$@ ./root
+	@echo ----- Elision $(arch) $(versao_kernel) Arquivo ISO com sucesso--
 
-ARCH=i386
-VERSION=0.0.1
-CP=cp
-BASH=bash
-MKDIR=mkdir -p
-ECHO=echo
-STRIP=/opt/aquila/bin/i686-aquila-strip
-LN=ln
 
-MAKEFLAGS += --no-print-directory
+creatiso: iso/Elision-$(arch)-$(versao_kernel).iso
 
-GRUB_MKRESCUE = $(shell command -v grub2-mkrescue 2> /dev/null)
-ifeq ($(GRUB_MKRESCUE),)
-GRUB_MKRESCUE = grub-mkrescue
-endif
+boch:
+	@echo ----- RUNNING COM BOCH ------------------- OK
+	@$(BOCHS) -q -f  "_tools/bochsrc-v1.bxrc"
 
-DESTDIR = $(SRCDIR)/sysroot
+vbox:
+	@echo ----- RUNNING COM VIRTUAL BOX ------------------- OK
+	@"C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm  teste
 
-.PHONY: build-all install-all clean-all
-build-all: \
-	build-kernel \
-	build-system \
-	build-initrd
+qemu:
+	@"L:\Aplications\QemuManager\qemu\qemu.exe" -L "L:\Aplications\QemuManager\qemu" -M "pc" -m 512 -cpu "qemu32" -vga std -serial vc -parallel vc -name "Elision" -drive "file=L:\HDVirtual\HDTeste10GB.qcow,index=0,media=disk" -drive "file=L:\Projetos\ElisionSystem\Elision\iso\Elision-x32-v0.11.22.iso,index=2,media=cdrom" -boot order=dc,menu=off -soundhw es1370 -kernel-kqemu -net nic,vlan=0,macaddr=52-54-00-D7-77-B3,model=rtl8139 -net user,vlan=0 -localtime
 
-install-all: \
-	install-kernel \
-	install-system \
-	install-initrd
+teste: creatiso qemu 
 
-clean-all: \
-	clean-kernel \
-	clean-system \
-	clean-initrd
+compile: clean apps creatiso
+compile2: apps creatiso
+compile-q: clean creatiso qemu
+compile-b: clean creatiso boch
+compile-vb: clean creatiso vbox
 
-#
-# kernel targets
-#
+.PHONY: clean
+clean:
+	@rm -rf .obj/source .obj/source.app $(FinalKernel) iso/Elision-$(arch)-$(versao_kernel).iso
+	@echo ------- Execulando Limpeza -----------
 
-.PHONY: build-kernel clean-kernel install-kernel
-build-kernel:
-	$(MAKE) -C $(SRCDIR)/kernel/
 
-install-kernel:
-	$(MAKE) -C $(SRCDIR)/kernel/ install
-
-clean-kernel:
-	$(MAKE) -C $(SRCDIR)/kernel/ clean
-
-#
-# initrd targets
-#
-
-.PHONY: build-initrd install-initrd clean-initrd
-build-initrd: build-system
-	$(MAKE) -C $(SRCDIR)/initrd/
-
-install-initrd: build-initrd
-	$(MAKE) -C $(SRCDIR)/initrd/ install
-
-clean-initrd:
-	$(MAKE) -C $(SRCDIR)/initrd/ clean
-
-#
-# system targets
-#
-
-.PHONY: build-system install-system clean-system
-build-system: 
-	$(MAKE) -C $(SRCDIR)/system/
-
-install-system: build-system
-	$(MAKE) -C $(SRCDIR)/system/ install
-
-clean-system:
-	$(MAKE) -C $(SRCDIR)/system/ clean
-
-.PHONY: iso/kernel.elf.gz
-iso/kernel.elf.gz: build-kernel
-	$(BASH) -c "if [[ ! -e iso ]]; then mkdir iso; fi"
-	$(CP) kernel/arch/$(ARCH)/kernel-$(VERSION).$(ARCH) iso/kernel.elf
-	gzip -f iso/kernel.elf
-
-.PHONY: iso/initrd.img.gz
-iso/initrd.img.gz: build-initrd
-	$(BASH) -c "if [[ ! -e iso ]]; then mkdir iso; fi"
-	cp initrd/initrd.img iso/initrd.img
-	gzip -f iso/initrd.img
-
-.PHONY: try
-try: aquila.iso
-	qemu-kvm -cdrom aquila.iso -hda hd.img -serial stdio -m 2G -d cpu_reset -no-reboot -boot d
-
-aquila.iso: iso/kernel.elf.gz iso/initrd.img.gz
-	$(GRUB_MKRESCUE) -d /usr/lib/grub/i386-pc/ -o aquila.iso iso/
-#	#$(GRUB_MKRESCUE) -d /usr/lib/grub/i386-pc/ --install-modules="multiboot normal videoinfo videotest gzio" --locales="en@quot" --fonts=ascii -o aquila.iso iso/
